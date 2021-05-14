@@ -51,14 +51,23 @@ def class_from_dict(thedict):
     modul = importlib.import_module(pack)
     clazz = getattr(modul, clname)
     inst = clazz.__new__(clazz)
-    print("class is", clazz)
     tmpargs, tmpkwargs = build_args(inst.__init__, thedict)
-    print(f"Calling init with {tmpargs}, {tmpkwargs}")
+    # recursively construct any nested objects, if necessary
+
+    def replace_by_obj(val):
+        if isinstance(val, dict) and "$class" in val:
+            return class_from_dict(val)
+        return val
+    tmpargs = [replace_by_obj(arg) for arg in tmpargs]
+    tmpkwargs = {n: replace_by_obj(arg) for n, arg in tmpkwargs.items()}
     inst.__init__(*tmpargs, **tmpkwargs)
     return inst
 
 
 class ObjFromConfig:
+
+    def __init__(self):
+        self._objfromconfig_cfg = {}
 
     @classmethod
     def from_config(cls, config):
@@ -68,19 +77,18 @@ class ObjFromConfig:
         initfunc = self.__init__
         parms = list(signature(initfunc).parameters.items())
         cfg = {}
-        # MAYBE: check if the value of the parm is its default value, if yes, do not store in config!
         for n, p in parms:
             # check if parm has a default value
             # if yes, check if that value is identical to the ldict value, if yes, do not store in config
             if p.default is not None and p.default == ldict[n]:
-                print("Skipping", n)
                 continue
-            cfg[n] = ldict[n]
+            # if an object has been created by a config, store the config instead of the object
+            val = ldict[n]
+            if isinstance(val, ObjFromConfig):
+                val = val.get_config()
+            cfg[n] = val
         cfg["$class"] = f"{self.__module__}.{type(self).__name__}"
         self._objfromconfig_cfg = cfg
 
     def get_config(self):
         return self._objfromconfig_cfg
-
-
-
